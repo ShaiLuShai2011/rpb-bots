@@ -234,6 +234,10 @@ class Handler(BaseHTTPRequestHandler):
         payload = {
             "status": "ok",
             "uptime_sec": int(time.time() - started_at),
+            "db": {
+                n: (os.path.getsize(os.path.join(DATA_DIR, c["db"])) if os.path.exists(os.path.join(DATA_DIR, c["db"])) else 0)
+                for n, c in BOTS.items()
+            },
             "bots": {
                 n: {
                     "alive": bool(procs.get(n) and procs[n]["proc"].poll() is None),
