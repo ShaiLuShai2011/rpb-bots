@@ -44,6 +44,18 @@ BOTS = {
             "THIRD_OWNER_ID": os.environ.get("NEV_OWNER_ID", ADMIN_IDS.split(",")[0]),
         },
     },
+    "petworld": {
+        "dir": "bots/petworld",
+        "entry": "bot.py",
+        "db": "petworld.db",
+        "token_env": "BOT_TOKEN_PETWORLD",
+        "extra": {
+            "GAME_GROUP_ID": os.environ.get("PETWORLD_GAME_GROUP_ID", "0"),
+            "PREMIUM_EMOJI": os.environ.get("PETWORLD_PREMIUM_EMOJI", "1"),
+            "PREMIUM_EMOJI_MAX": os.environ.get("PETWORLD_PREMIUM_EMOJI_MAX", "30"),
+            "PREMIUM_EMOJI_PACK": os.environ.get("PETWORLD_PREMIUM_EMOJI_PACK", "AnimatedEmoji"),
+        },
+    },
     "rpb": {
         "dir": "bots/rpb",
         "entry": "bot.py",
@@ -82,19 +94,29 @@ def _db_snapshot(src_path: str, dst_path: str) -> bool:
 
 
 def hf_upload(paths: list) -> None:
+    """Бэкапы грузим как base64-текст: HF не принимает бинарники без Xet/LFS."""
     if not HF_TOKEN or not HF_BACKUP_REPO:
         return
     try:
+        import base64
         from huggingface_hub import HfApi
 
         api = HfApi(token=HF_TOKEN)
         for path in paths:
+            name = os.path.basename(path)
+            b64_path = path + ".b64"
+            with open(path, "rb") as f:
+                import textwrap
+                enc = base64.b64encode(f.read()).decode()
+                with open(b64_path, "w") as out:
+                    out.write("\n".join(textwrap.wrap(enc, 76)) + "\n")
             api.upload_file(
-                path_or_fileobj=path,
-                path_in_repo=os.path.basename(path),
+                path_or_fileobj=b64_path,
+                path_in_repo=name + ".txt",
                 repo_id=HF_BACKUP_REPO,
                 repo_type="dataset",
             )
+            os.remove(b64_path)
         log(f"backup uploaded: {[os.path.basename(p) for p in paths]}")
     except Exception as e:
         log(f"backup upload failed: {e}")
@@ -107,21 +129,41 @@ def hf_restore() -> None:
         from huggingface_hub import hf_hub_download
 
         os.makedirs(DATA_DIR, exist_ok=True)
-        for name in ("nuslay.db", "nev.db", "rpb.db"):
+        import base64
+
+        for name in ("nuslay.db", "nev.db", "rpb.db", "petworld.db"):
             target = os.path.join(DATA_DIR, name)
             if os.path.exists(target):
                 continue
+            restored = False
             try:
                 path = hf_hub_download(
                     repo_id=HF_BACKUP_REPO,
-                    filename=name,
+                    filename=name + ".txt",
                     repo_type="dataset",
                     token=HF_TOKEN,
                 )
-                shutil.copy2(path, target)
-                log(f"restored {name}")
+                with open(path) as f:
+                    data = base64.b64decode("".join(f.read().split()))
+                with open(target, "wb") as out:
+                    out.write(data)
+                restored = True
             except Exception:
                 pass
+            if not restored:
+                try:
+                    path = hf_hub_download(
+                        repo_id=HF_BACKUP_REPO,
+                        filename=name,
+                        repo_type="dataset",
+                        token=HF_TOKEN,
+                    )
+                    shutil.copy2(path, target)
+                    restored = True
+                except Exception:
+                    pass
+            if restored:
+                log(f"restored {name}")
     except Exception as e:
         log(f"restore failed: {e}")
 
