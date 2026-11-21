@@ -211,6 +211,10 @@ def build_env(name: str, cfg: dict) -> dict:
     env["DB_PATH"] = os.path.join(DATA_DIR, cfg["db"])
     env["ADMIN_IDS"] = ADMIN_IDS
     env["ADMIN_ID"] = ADMIN_IDS.split(",")[0]
+    # Экономия RSS: меньше арен glibc и агрессивнее возврат памяти ОС
+    env["MALLOC_ARENA_MAX"] = "2"
+    env["MALLOC_TRIM_THRESHOLD_"] = "131072"
+    env["MALLOC_MMAP_THRESHOLD_"] = "131072"
     for k, v in cfg["extra"].items():
         env[k] = str(v)
     return env
