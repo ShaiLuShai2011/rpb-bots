@@ -10479,6 +10479,107 @@ async def cmd_admgold(message: Message):
     await message.answer(f"✅ Выдано {amount}💰 стране {country['emoji']} {country['name']} (@{username})", parse_mode="HTML")
 
 
+# ── СБРОС КАРТЫ (АДМИН) ─────────────────────────────────────────────
+
+_RESET_MAP_TABLES = [
+    "deployments", "bombardments", "trade_ships", "ship_captures", "spy_ops",
+    "claims", "war_weariness", "wars", "pacts", "alliances", "bloc_members",
+    "blocs", "un_resolutions", "coalitions", "coalition_members",
+    "victory_points", "trade_deals", "vassals", "territory_market",
+    "garrisons", "buildings", "technologies", "military", "resources",
+    "achievements", "cooldowns", "protest_log", "event_log",
+    "newspaper_state", "territories",
+]
+
+
+async def _reset_chat_map(chat_id: int) -> dict:
+    db = await _open_db()
+    removed = {}
+    async with db:
+        cur = await db.execute("SELECT id FROM countries WHERE chat_id=?", (chat_id,))
+        ids = [r[0] for r in await cur.fetchall()]
+        for table in _RESET_MAP_TABLES:
+            tcur = await db.execute(f"PRAGMA table_info({table})")
+            cols = [r[1] for r in await tcur.fetchall()]
+            if not cols:
+                continue
+            if "chat_id" in cols:
+                dcur = await db.execute(f"DELETE FROM {table} WHERE chat_id=?", (chat_id,))
+            elif "country_id" in cols and ids:
+                ph = ",".join(["?"] * len(ids))
+                dcur = await db.execute(f"DELETE FROM {table} WHERE country_id IN ({ph})", ids)
+            else:
+                continue
+            removed[table] = max(0, dcur.rowcount or 0)
+        dcur = await db.execute("DELETE FROM countries WHERE chat_id=?", (chat_id,))
+        removed["countries"] = max(0, dcur.rowcount or 0)
+        await db.commit()
+    return removed
+
+
+@router_admin.message(Command("resetmap"))
+async def cmd_resetmap(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    if message.chat.type == "private":
+        await message.answer("Сброс карты — только в групповом чате.")
+        return
+    chat_id = message.chat.id
+    db = await _open_db()
+    async with db:
+        c = await db.execute("SELECT COUNT(*) FROM countries WHERE chat_id=?", (chat_id,))
+        n_countries = (await c.fetchone())[0]
+        c = await db.execute(
+            "SELECT COUNT(*) FROM territories WHERE chat_id=? AND country_id IS NOT NULL",
+            (chat_id,),
+        )
+        n_terr = (await c.fetchone())[0]
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Да, сбросить карту", callback_data=f"resetmap:go:{chat_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="resetmap:cancel")],
+    ])
+    await message.answer(
+        "⚠️ <b>Сброс карты</b>\n\n"
+        f"Будет удалено: <b>{n_countries}</b> стран, <b>{n_terr}</b> занятых территорий, "
+        "а также войны, союзы, гарнизоны, постройки, технологии, рынок и статистика.\n\n"
+        "❗️ Действие необратимо. Продолжить?",
+        parse_mode="HTML",
+        reply_markup=kb,
+    )
+
+
+@router_admin.callback_query(F.data.startswith("resetmap:"))
+async def cb_resetmap(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    parts = (callback.data or "").split(":")
+    if len(parts) >= 2 and parts[1] == "cancel":
+        await callback.answer("Отменено")
+        try:
+            await callback.message.edit_text("❌ Сброс карты отменён.")
+        except Exception:
+            pass
+        return
+    if len(parts) < 3 or not parts[2].lstrip("-").isdigit():
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    chat_id = int(parts[2])
+    removed = await _reset_chat_map(chat_id)
+    total = sum(removed.values())
+    await callback.answer("Карта сброшена")
+    try:
+        await callback.message.edit_text(
+            "✅ <b>Карта сброшена!</b>\n\n"
+            f"Стран удалено: <b>{removed.get('countries', 0)}</b>\n"
+            f"Записей очищено: <b>{total}</b>\n\n"
+            "Все могут заново основать страну: <code>/create</code>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
 @router_admin.message(Command("admresetcd"))
 async def cmd_admresetcd(message: Message):
     """Сбросить кулдауны игрока: /admresetcd @username или /admresetcd USER_ID"""
