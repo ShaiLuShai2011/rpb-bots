@@ -507,6 +507,8 @@ PETS = {
     "frost_titan":    {"emoji":"❄️","name":"Ледяной титан",    "atk":100,"def":75,"hp":430,"rarity":"godlike",   "ability":"Абсолютный ноль: заморозка"},
     "storm_titan":    {"emoji":"⚡","name":"Штормовой титан",  "atk":108,"def":68,"hp":405,"rarity":"godlike",   "ability":"Шторм: 3 удара за раунд"},
     "primordial_wyrm":{"emoji":"🌌","name":"Первородный змей", "atk":120,"def":80,"hp":500,"rarity":"godlike",   "ability":"Начало: сбрасывает HP врага до 10%"},
+    # ЭКСКЛЮЗИВ: только через админ-панель, в яйцах и дропах отсутствует
+    "mama_genius":   {"emoji":"🦸‍♀️","name":"Мама Гениуса",   "atk":200,"def":150,"hp":5000,"rarity":"otherworldly","ability":"Мощный прыжок: сокрушительный удар"},
 }
 
 EVOLUTION_STAGES = {
@@ -531,6 +533,7 @@ PET_SELL_BASE = {
     "legendary": 2500,
     "mythic": 2500,
     "godlike": 20000,
+    "otherworldly": 100000,
 }
 
 PET_EGG_FLOOR = {
@@ -539,6 +542,7 @@ PET_EGG_FLOOR = {
     "legendary": 2500,
     "mythic": 2500,
     "godlike": 10000,
+    "otherworldly": 100000,
 }
 
 def pet_sell_value(pet):
@@ -2650,8 +2654,8 @@ WORLD_MULTIPLIERS = {
 
 # Пул яиц (совместимость со старым кодом)
 WORLD_EGGS = build_world_eggs()
-RARITY_EMOJI = {"common":"⚪","rare":"🟣","legendary":"🌟","mythic":"💎","godlike":"⚡"}
-RARITY_NAMES = {"common":"Обычный","rare":"Редкий","legendary":"Легендарный","mythic":"Мифический","godlike":"Богоподобный"}
+RARITY_EMOJI = {"common":"⚪","rare":"🟣","legendary":"🌟","mythic":"💎","godlike":"⚡","otherworldly":"👁️"}
+RARITY_NAMES = {"common":"Обычный","rare":"Редкий","legendary":"Легендарный","mythic":"Мифический","godlike":"Богоподобный","otherworldly":"Потусторонний"}
 
 # ═══════════════════════════════════════════════════
 # ГЕНЕРАТОР КАРТОЧКИ ПИТОМЦА (Pillow)
@@ -2680,6 +2684,7 @@ RARITY_COLORS = {
     "legendary": (255, 159,  28),
     "mythic":    (199, 125, 255),
     "godlike":   (255,  77, 109),
+    "otherworldly": (120, 255, 214),
 }
 
 # Путь к шрифту — кладёшь рядом с ботом
@@ -9237,7 +9242,7 @@ async def cb_fuse_do(cb):
         # 4. Определяем тип нового питомца
         pd1 = PETS.get(p1['pet_type'], PETS['dog'])
         pd2 = PETS.get(p2['pet_type'], PETS['dog'])
-        rarity_order = ["common", "rare", "legendary", "mythic", "godlike"]
+        rarity_order = ["common", "rare", "legendary", "mythic", "godlike", "otherworldly"]
         r1 = rarity_order.index(pd1.get('rarity', 'common') if pd1.get('rarity', 'common') in rarity_order else 'common')
         r2 = rarity_order.index(pd2.get('rarity', 'common') if pd2.get('rarity', 'common') in rarity_order else 'common')
         base_type = p1['pet_type'] if r1 >= r2 else p2['pet_type']
@@ -10507,12 +10512,33 @@ async def s_adm_give_pet_uid(msg: Message, state: FSMContext):
 async def s_adm_give_pet_type(msg: Message, state: FSMContext):
     if not is_admin(msg.from_user.id): return
     pt=msg.text.strip()
+    _aliases={"мама":"mama_genius","мама гениуса":"mama_genius","mama":"mama_genius","мамагениуса":"mama_genius"}
+    pt=_aliases.get(pt.lower(), pt)
     if pt not in PETS: await safe_reply(msg,"❌ Питомец не найден!"); return
     data=await state.get_data(); await state.clear()
     uid=data['give_uid']; p=PETS[pt]
     await create_pet(uid, p['name'], pt)
     u=await get_user(uid)
     await safe_reply(msg,f"✅ {p['emoji']} <b>{p['name']}</b> выдан игроку <b>{u.get('first_name','?')}</b>!",parse_mode="HTML")
+
+# ── БЫСТРАЯ ВЫДАЧА ЭКСКЛЮЗИВА СЕБЕ ──────────────────────────────────
+
+@router.message(Command("mama"))
+async def cmd_mama_give(msg: Message):
+    if not is_admin(msg.from_user.id):
+        return
+    u = await get_user(msg.from_user.id)
+    if not u:
+        await safe_reply(msg, "❌ Сначала напиши /start в боте.")
+        return
+    await create_pet(msg.from_user.id, "Мама Гениуса", "mama_genius")
+    await safe_reply(
+        msg,
+        "✅ <b>🦸‍♀️ Мама Гениуса</b> выдан тебе!\n"
+        "Ур. 1 · ❤️ 5000 HP · редкость <b>Потусторонний</b> · способность «Мощный прыжок»",
+        parse_mode="HTML",
+    )
+
 
 # ── ЗАБРАТЬ ПИТОМЦА (АДМИН) ───────────────────────────────────────────
 
