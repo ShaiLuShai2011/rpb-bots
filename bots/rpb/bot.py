@@ -5219,6 +5219,19 @@ UNIT_LABELS = {
     "tank":      "🛡 Танки",
 }
 
+# Сила одного юнита (для штурмов) и минимум силы для захвата чужой/нейтральной земли.
+UNIT_POWER = {"infantry": 1.0, "cavalry": 1.5, "artillery": 20.0, "airforce": 3.0,
+              "bomber": 5.0, "navy": 10.0, "armored": 8.0, "tank": 15.0}
+MIN_ASSAULT_POWER = 10
+
+
+async def _refund_units(db, country_id: int, unit_type: str, count: int) -> None:
+    if count > 0:
+        await db.execute(
+            f"UPDATE military SET {unit_type}={unit_type}+? WHERE country_id=?",
+            (count, country_id),
+        )
+
 
 async def send_deployment(chat_id: int, attacker_id: int, target_iso: str,
                           unit_type: str, unit_count: int) -> tuple:
@@ -5242,6 +5255,28 @@ async def send_deployment(chat_id: int, attacker_id: int, target_iso: str,
         )
         _tr = await _tc.fetchone()
         is_own = _tr and _tr["country_id"] == attacker_id
+        target_owner = _tr["country_id"] if _tr else None
+
+    # ── БАЛАНС: десант без границ запрещён ──────────────────────────────
+    if target_owner is None:
+        return False, (
+            "Нейтральные земли захватываются командой /expand (у неё есть цена и кулдаун). "
+            "Десант разрешён только на свои или вражеские территории."
+        )
+    if target_owner != attacker_id:
+        own_territories = await get_country_territories(chat_id, attacker_id)
+        if not any(is_neighbor(t, target_iso) for t in own_territories):
+            return False, (
+                f"{target_iso} не граничит с вашими землями. "
+                "Десант возможен только на соседние территории."
+            )
+        if not await get_active_war(chat_id, attacker_id, target_owner):
+            return False, f"Сначала объявите войну: /war {target_iso}."
+        if unit_count * UNIT_POWER.get(unit_type, 1.0) < MIN_ASSAULT_POWER:
+            return False, (
+                f"Слишком мало войск для штурма: нужно ≥ {MIN_ASSAULT_POWER} силы "
+                f"(например, {MIN_ASSAULT_POWER} пехоты)."
+            )
 
     if is_own and rr_levels > 0:
         discount = min(0.8, rr_levels * 0.2)  # -20% за уровень, макс -80%
@@ -5320,6 +5355,18 @@ async def resolve_deployments(chat_id: int, bot: Bot):
                     pass
                 msg = None
             elif owner_cid is None:
+                _power = unit_count * UNIT_POWER.get(unit_type, 1.0)
+                if _power < MIN_ASSAULT_POWER:
+                    await _refund_units(db, attacker_id, unit_type, unit_count)
+                    await db.commit()
+                    try:
+                        await _safe_send(bot, chat_id,
+                            f"⚠️ {attacker['emoji']} <b>{attacker['name']}</b>: слишком мало войск "
+                            f"для захвата <b>{COUNTRY_NAMES.get(target_iso, target_iso)}</b> — "
+                            f"войска возвращены. Захват нейтральных земель — через /expand.", parse_mode="HTML")
+                    except Exception:
+                        pass
+                    continue
                 await db.execute(
                     "INSERT OR REPLACE INTO territories (chat_id, iso, country_id) VALUES (?,?,?)",
                     (chat_id, target_iso, attacker_id)
@@ -5337,6 +5384,21 @@ async def resolve_deployments(chat_id: int, bot: Bot):
                     pass
                 msg = None
             else:
+                _war_ok = await get_active_war(chat_id, attacker_id, owner_cid)
+                _own_terr = await get_country_territories(chat_id, attacker_id)
+                _adjacent = any(is_neighbor(t, target_iso) for t in _own_terr)
+                if not _war_ok or not _adjacent:
+                    await _refund_units(db, attacker_id, unit_type, unit_count)
+                    await db.commit()
+                    reason = "война не объявлена" if not _war_ok else "территория не граничит с вашими землями"
+                    try:
+                        await _safe_send(bot, chat_id,
+                            f"⚠️ {attacker['emoji']} <b>{attacker['name']}</b>: десант на "
+                            f"<b>{COUNTRY_NAMES.get(target_iso, target_iso)}</b> отменён ({reason}) — "
+                            f"войска возвращены.", parse_mode="HTML")
+                    except Exception:
+                        pass
+                    continue
                 c4 = await db.execute("SELECT * FROM countries WHERE id=?", (owner_cid,))
                 defender = await c4.fetchone()
                 # Сила защитника = ТОЛЬКО гарнизон на этой территории
@@ -5358,6 +5420,17 @@ async def resolve_deployments(chat_id: int, bot: Bot):
                 )
 
                 # BUG FIX: если у жертвы 0 армии — автозахват без боя
+                if def_strength == 0 and unit_count * UNIT_POWER.get(unit_type, 1.0) < MIN_ASSAULT_POWER:
+                    await _refund_units(db, attacker_id, unit_type, unit_count)
+                    await db.commit()
+                    try:
+                        await _safe_send(bot, chat_id,
+                            f"⚠️ {attacker['emoji']} <b>{attacker['name']}</b>: слишком мало войск для "
+                            f"захвата <b>{ter_name}</b> — войска возвращены (нужно ≥ {MIN_ASSAULT_POWER} силы).",
+                            parse_mode="HTML")
+                    except Exception:
+                        pass
+                    continue
                 if def_strength == 0:
                     await db.execute(
                         "INSERT OR REPLACE INTO territories (chat_id, iso, country_id) VALUES (?,?,?)",
@@ -6212,6 +6285,8 @@ async def cmd_deploy(message: Message):
             "🚀 <b>Отправка войск</b>\n\n"
             "Использование: <code>/deploy ISO тип количество</code>\n"
             "Пример: <code>/deploy DE infantry 200</code>\n\n"
+            "ℹ️ Правила: свои земли — гарнизон; вражеские — только по соседству и после /war; "
+            "нейтральные — через /expand. Для штурма нужно ≥ 10 силы.\n\n"
             f"<b>Типы войск:</b>\n{lines}",
             parse_mode="HTML"
         )
