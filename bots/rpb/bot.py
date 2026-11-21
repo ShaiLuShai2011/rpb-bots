@@ -55,7 +55,7 @@ from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup,
     InlineKeyboardButton, BufferedInputFile, BotCommand, MessageEntity
 )
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 
 from aiogram.fsm.state import State, StatesGroup
@@ -5524,6 +5524,26 @@ async def resolve_deployments(chat_id: int, bot: Bot):
 
 
 router_create = Router()
+
+
+@router_create.message(CommandStart())
+async def cmd_start_rpb(message: Message):
+    if message.chat.type == "private":
+        await message.answer(
+            "🌍 <b>RP Country</b> — стратегия стран прямо в Telegram.\n\n"
+            "Бот работает <b>в групповом чате</b>:\n"
+            "1. Добавь меня в чат и дай право читать сообщения\n"
+            "2. Отключи Group Privacy у @BotFather (<code>/setprivacy</code> → Disable)\n"
+            "3. Напиши в чате <code>/create</code> — выберешь страну, флаг и цвет\n\n"
+            "📖 Полный гайд: <code>/help</code>"
+        )
+    else:
+        await message.answer(
+            "🌍 <b>RP Country</b>\n\n"
+            "🏛 <code>/create</code> — основать страну\n"
+            "📖 <code>/help</code> — все команды\n"
+            "🗺 <code>/map</code> · 🏆 <code>/top</code>"
+        )
 
 COLORS = {
     # Основные
