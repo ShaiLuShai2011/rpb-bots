@@ -17,6 +17,7 @@ PORT = int(os.environ.get("PORT", "7860"))
 HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
 HF_BACKUP_REPO = os.environ.get("HF_BACKUP_REPO", "").strip()
 BACKUP_EVERY = int(os.environ.get("BACKUP_EVERY_SEC", "600"))
+BACKUP_BOTS = [x.strip() for x in os.environ.get("BACKUP_BOTS", "").split(",") if x.strip()]
 
 ADMIN_IDS = os.environ.get("ADMIN_IDS", "8839678195")
 
@@ -138,7 +139,9 @@ def hf_restore() -> None:
         os.makedirs(DATA_DIR, exist_ok=True)
         import base64
 
-        for name in ("nuslay.db", "nev.db", "rpb.db", "petworld.db"):
+        wanted = [n for n in ("nuslay.db", "nev.db", "rpb.db", "petworld.db")
+                  if not BACKUP_BOTS or n[:-3] in BACKUP_BOTS]
+        for name in wanted:
             target = os.path.join(DATA_DIR, name)
             if os.path.exists(target):
                 continue
@@ -198,6 +201,8 @@ def backup_loop() -> None:
         try:
             snap_paths = []
             for name, cfg in BOTS.items():
+                if BACKUP_BOTS and name not in BACKUP_BOTS:
+                    continue
                 src = os.path.join(DATA_DIR, cfg["db"])
                 tmp = os.path.join(DATA_DIR, f"_snap_{cfg['db']}")
                 if _db_snapshot(src, tmp):
