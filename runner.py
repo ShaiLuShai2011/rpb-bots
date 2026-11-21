@@ -282,6 +282,27 @@ def tail(path: str, lines: int = 20) -> str:
         return ""
 
 
+def cgroup_mem_mb():
+    for path in ("/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory/memory.usage_in_bytes"):
+        try:
+            with open(path) as f:
+                return round(int(f.read().strip()) / 1048576, 1)
+        except Exception:
+            pass
+    return None
+
+
+def cgroup_max_mb():
+    for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            with open(path) as f:
+                v = f.read().strip()
+                return round(int(v) / 1048576, 1) if v.isdigit() else None
+        except Exception:
+            pass
+    return None
+
+
 def proc_mem_kb(pid) -> int:
     try:
         with open(f"/proc/{pid}/status") as f:
@@ -323,6 +344,8 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 for n in BOTS
             },
+            "cgroup_mb": cgroup_mem_mb(),
+            "cgroup_max_mb": cgroup_max_mb(),
             "mem_total_kb": sum(
                 proc_mem_kb(procs[n]["proc"].pid)
                 for n in BOTS if procs.get(n) and procs[n]["proc"].poll() is None
@@ -346,7 +369,9 @@ def main() -> None:
     threading.Thread(target=backup_loop, daemon=True).start()
     threading.Thread(target=keepalive_loop, daemon=True).start()
     threading.Thread(target=supervise_loop, daemon=True).start()
-    for name in BOTS:
+    for idx, name in enumerate(BOTS):
+        if idx:
+            time.sleep(12)
         start_bot(name)
 
     def shutdown(signum, frame):
