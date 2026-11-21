@@ -271,6 +271,30 @@ def tail(path: str, lines: int = 20) -> str:
         return ""
 
 
+def proc_mem_kb(pid) -> int:
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+    except Exception:
+        pass
+    return 0
+
+
+def log_tail(name: str, lines: int = 4) -> str:
+    path = os.path.join(DATA_DIR, f"{name}.log")
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 3000))
+            data = f.read().decode("utf-8", "ignore").splitlines()
+        return "\n".join(data[-lines:])[-600:]
+    except Exception:
+        return ""
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         payload = {
@@ -284,9 +308,15 @@ class Handler(BaseHTTPRequestHandler):
                 n: {
                     "alive": bool(procs.get(n) and procs[n]["proc"].poll() is None),
                     "pid": procs.get(n, {}).get("proc") and procs[n]["proc"].pid,
+                    "mem_kb": proc_mem_kb(procs[n]["proc"].pid) if procs.get(n) and procs[n]["proc"].poll() is None else 0,
                 }
                 for n in BOTS
             },
+            "mem_total_kb": sum(
+                proc_mem_kb(procs[n]["proc"].pid)
+                for n in BOTS if procs.get(n) and procs[n]["proc"].poll() is None
+            ),
+            "log_tail": {n: log_tail(n) for n in BOTS},
         }
         body = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(200)
