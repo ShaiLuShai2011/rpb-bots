@@ -366,12 +366,13 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     hf_restore()
+    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    log(f"healthcheck на :{PORT} (сразу, до ботов)")
     threading.Thread(target=backup_loop, daemon=True).start()
     threading.Thread(target=keepalive_loop, daemon=True).start()
     threading.Thread(target=supervise_loop, daemon=True).start()
-    for idx, name in enumerate(BOTS):
-        if idx:
-            time.sleep(12)
+    for name in BOTS:
         start_bot(name)
 
     def shutdown(signum, frame):
@@ -393,9 +394,8 @@ def main() -> None:
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
-    server = HTTPServer(("0.0.0.0", PORT), Handler)
-    log(f"healthcheck на :{PORT}")
-    server.serve_forever()
+    while True:
+        time.sleep(3600)
 
 
 if __name__ == "__main__":
