@@ -104,6 +104,8 @@ def hf_upload(paths: list) -> None:
         api = HfApi(token=HF_TOKEN)
         for path in paths:
             name = os.path.basename(path)
+            if name.startswith("_snap_"):
+                name = name[len("_snap_"):]
             b64_path = path + ".b64"
             with open(path, "rb") as f:
                 import textwrap
@@ -117,6 +119,11 @@ def hf_upload(paths: list) -> None:
                 repo_type="dataset",
             )
             os.remove(b64_path)
+            for legacy in ("_snap_" + name, "_snap_" + name + ".txt"):
+                try:
+                    api.delete_file(path_in_repo=legacy, repo_id=HF_BACKUP_REPO, repo_type="dataset")
+                except Exception:
+                    pass
         log(f"backup uploaded: {[os.path.basename(p) for p in paths]}")
     except Exception as e:
         log(f"backup upload failed: {e}")
